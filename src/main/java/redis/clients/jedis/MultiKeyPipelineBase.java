@@ -1,12 +1,14 @@
 package redis.clients.jedis;
 
+import redis.clients.jedis.commands.*;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-abstract class MultiKeyPipelineBase extends PipelineBase implements MultiKeyBinaryRedisPipeline,
-    MultiKeyCommandsPipeline, ClusterPipeline, BinaryScriptingCommandsPipeline,
-    ScriptingCommandsPipeline {
+public abstract class MultiKeyPipelineBase extends PipelineBase implements
+    MultiKeyBinaryRedisPipeline, MultiKeyCommandsPipeline, ClusterPipeline,
+    BinaryScriptingCommandsPipeline, ScriptingCommandsPipeline {
 
   protected Client client = null;
 
@@ -67,6 +69,16 @@ abstract class MultiKeyPipelineBase extends PipelineBase implements MultiKeyBina
 
   public Response<Long> del(byte[]... keys) {
     client.del(keys);
+    return getResponse(BuilderFactory.LONG);
+  }
+
+  public Response<Long> exists(String... keys) {
+    client.exists(keys);
+    return getResponse(BuilderFactory.LONG);
+  }
+
+  public Response<Long> exists(byte[]... keys) {
+    client.exists(keys);
     return getResponse(BuilderFactory.LONG);
   }
 

@@ -13,9 +13,15 @@ public class JedisSlotBasedConnectionHandler extends JedisClusterConnectionHandl
 
   public JedisSlotBasedConnectionHandler(Set<HostAndPort> nodes,
       final GenericObjectPoolConfig poolConfig, int timeout) {
-    super(nodes, poolConfig, timeout);
+    this(nodes, poolConfig, timeout, timeout);
   }
 
+  public JedisSlotBasedConnectionHandler(Set<HostAndPort> nodes,
+      final GenericObjectPoolConfig poolConfig, int connectionTimeout, int soTimeout) {
+    super(nodes, poolConfig, connectionTimeout, soTimeout);
+  }
+
+  @Override
   public Jedis getConnection() {
     // In antirez's redis-rb-cluster implementation,
     // getRandomConnection always return valid connection (able to
@@ -59,12 +65,4 @@ public class JedisSlotBasedConnectionHandler extends JedisClusterConnectionHandl
       return getConnection();
     }
   }
-
-  private List<JedisPool> getShuffledNodesPool() {
-    List<JedisPool> pools = new ArrayList<JedisPool>();
-    pools.addAll(cache.getNodes().values());
-    Collections.shuffle(pools);
-    return pools;
-  }
-
 }

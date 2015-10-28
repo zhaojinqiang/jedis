@@ -1,5 +1,6 @@
 package redis.clients.jedis;
 
+import static redis.clients.jedis.Protocol.sendCommand;
 import static redis.clients.jedis.Protocol.toByteArray;
 import static redis.clients.jedis.Protocol.Command.*;
 import static redis.clients.jedis.Protocol.Keyword.ENCODING;
@@ -13,6 +14,7 @@ import static redis.clients.jedis.Protocol.Keyword.RESET;
 import static redis.clients.jedis.Protocol.Keyword.STORE;
 import static redis.clients.jedis.Protocol.Keyword.WITHSCORES;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +22,10 @@ import java.util.Map.Entry;
 
 import redis.clients.jedis.Protocol.Command;
 import redis.clients.jedis.Protocol.Keyword;
+import redis.clients.jedis.params.geo.GeoRadiusParam;
+import redis.clients.jedis.params.set.SetParams;
+import redis.clients.jedis.params.sortedset.ZAddParams;
+import redis.clients.jedis.params.sortedset.ZIncrByParams;
 import redis.clients.util.SafeEncoder;
 
 public class BinaryClient extends Connection {
@@ -63,9 +69,7 @@ public class BinaryClient extends Connection {
   private byte[][] joinParameters(byte[] first, byte[][] rest) {
     byte[][] result = new byte[rest.length + 1][];
     result[0] = first;
-    for (int i = 0; i < rest.length; i++) {
-      result[i + 1] = rest[i];
-    }
+    System.arraycopy(rest, 0, result, 1, rest.length);
     return result;
   }
 
@@ -100,9 +104,8 @@ public class BinaryClient extends Connection {
     sendCommand(Command.SET, key, value);
   }
 
-  public void set(final byte[] key, final byte[] value, final byte[] nxxx, final byte[] expx,
-      final long time) {
-    sendCommand(Command.SET, key, value, nxxx, expx, toByteArray(time));
+  public void set(final byte[] key, final byte[] value, final SetParams params) {
+    sendCommand(Command.SET, params.getByteParams(key, value));
   }
 
   public void get(final byte[] key) {
@@ -112,6 +115,10 @@ public class BinaryClient extends Connection {
   public void quit() {
     db = 0;
     sendCommand(QUIT);
+  }
+
+  public void exists(final byte[]... keys) {
+    sendCommand(EXISTS, keys);
   }
 
   public void exists(final byte[] key) {
@@ -401,20 +408,28 @@ public class BinaryClient extends Connection {
     sendCommand(ZADD, key, toByteArray(score), member);
   }
 
-  public void zaddBinary(final byte[] key, final Map<byte[], Double> scoreMembers) {
+  public void zadd(final byte[] key, final double score, final byte[] member,
+      final ZAddParams params) {
+    sendCommand(ZADD, params.getByteParams(key, toByteArray(score), member));
+  }
 
+  public void zadd(final byte[] key, final Map<byte[], Double> scoreMembers) {
     ArrayList<byte[]> args = new ArrayList<byte[]>(scoreMembers.size() * 2 + 1);
     args.add(key);
-
-    for (Map.Entry<byte[], Double> entry : scoreMembers.entrySet()) {
-      args.add(toByteArray(entry.getValue()));
-      args.add(entry.getKey());
-    }
+    args.addAll(convertScoreMembersToByteArrays(scoreMembers));
 
     byte[][] argsArray = new byte[args.size()][];
     args.toArray(argsArray);
 
     sendCommand(ZADD, argsArray);
+  }
+
+  public void zadd(final byte[] key, final Map<byte[], Double> scoreMembers, final ZAddParams params) {
+    ArrayList<byte[]> args = convertScoreMembersToByteArrays(scoreMembers);
+    byte[][] argsArray = new byte[args.size()][];
+    args.toArray(argsArray);
+
+    sendCommand(ZADD, params.getByteParams(key, argsArray));
   }
 
   public void zrange(final byte[] key, final long start, final long end) {
@@ -427,6 +442,12 @@ public class BinaryClient extends Connection {
 
   public void zincrby(final byte[] key, final double score, final byte[] member) {
     sendCommand(ZINCRBY, key, toByteArray(score), member);
+  }
+
+  public void zincrby(final byte[] key, final double score, final byte[] member,
+      final ZIncrByParams params) {
+    // Note that it actually calls ZADD with INCR option, so it requires Redis 3.0.2 or upper.
+    sendCommand(ZADD, params.getByteParams(key, toByteArray(score), member));
   }
 
   public void zrank(final byte[] key, final byte[] member) {
@@ -938,6 +959,7 @@ public class BinaryClient extends Connection {
     return db;
   }
 
+  @Override
   public void disconnect() {
     db = 0;
     super.disconnect();
@@ -1096,15 +1118,6 @@ public class BinaryClient extends Connection {
     sendCommand(PSETEX, key, toByteArray(milliseconds), value);
   }
 
-  public void set(final byte[] key, final byte[] value, final byte[] nxxx) {
-    sendCommand(Command.SET, key, value, nxxx);
-  }
-
-  public void set(final byte[] key, final byte[] value, final byte[] nxxx, final byte[] expx,
-      final int time) {
-    sendCommand(Command.SET, key, value, nxxx, expx, toByteArray(time));
-  }
-
   public void srandmember(final byte[] key, final int count) {
     sendCommand(SRANDMEMBER, key, toByteArray(count));
   }
@@ -1196,5 +1209,85 @@ public class BinaryClient extends Connection {
 
   public void pfmerge(final byte[] destkey, final byte[]... sourcekeys) {
     sendCommand(PFMERGE, joinParameters(destkey, sourcekeys));
+  }
+
+  public void readonly() {
+    sendCommand(READONLY);
+  }
+
+  public void geoadd(byte[] key, double longitude, double latitude, byte[] member) {
+    sendCommand(GEOADD, key, toByteArray(longitude), toByteArray(latitude), member);
+  }
+
+  public void geoadd(byte[] key, Map<byte[], GeoCoordinate> memberCoordinateMap) {
+    List<byte[]> args = new ArrayList<byte[]>(memberCoordinateMap.size() * 3 + 1);
+    args.add(key);
+    args.addAll(convertGeoCoordinateMapToByteArrays(memberCoordinateMap));
+
+    byte[][] argsArray = new byte[args.size()][];
+    args.toArray(argsArray);
+
+    sendCommand(GEOADD, argsArray);
+  }
+
+  public void geodist(byte[] key, byte[] member1, byte[] member2) {
+    sendCommand(GEODIST, key, member1, member2);
+  }
+
+  public void geodist(byte[] key, byte[] member1, byte[] member2, GeoUnit unit) {
+    sendCommand(GEODIST, key, member1, member2, unit.raw);
+  }
+
+  public void geohash(byte[] key, byte[]... members) {
+    sendCommand(GEOHASH, joinParameters(key, members));
+  }
+
+  public void geopos(byte[] key, byte[][] members) {
+    sendCommand(GEOPOS, joinParameters(key, members));
+  }
+
+  public void georadius(byte[] key, double longitude, double latitude, double radius, GeoUnit unit) {
+    sendCommand(GEORADIUS, key, toByteArray(longitude), toByteArray(latitude), toByteArray(radius),
+      unit.raw);
+  }
+
+  public void georadius(byte[] key, double longitude, double latitude, double radius, GeoUnit unit,
+      GeoRadiusParam param) {
+    sendCommand(GEORADIUS, param.getByteParams(key, toByteArray(longitude), toByteArray(latitude),
+      toByteArray(radius), unit.raw));
+  }
+
+  public void georadiusByMember(byte[] key, byte[] member, double radius, GeoUnit unit) {
+    sendCommand(GEORADIUSBYMEMBER, key, member, toByteArray(radius), unit.raw);
+  }
+
+  public void georadiusByMember(byte[] key, byte[] member, double radius, GeoUnit unit,
+      GeoRadiusParam param) {
+    sendCommand(GEORADIUSBYMEMBER, param.getByteParams(key, member, toByteArray(radius), unit.raw));
+  }
+
+  private ArrayList<byte[]> convertScoreMembersToByteArrays(final Map<byte[], Double> scoreMembers) {
+    ArrayList<byte[]> args = new ArrayList<byte[]>(scoreMembers.size() * 2);
+
+    for (Map.Entry<byte[], Double> entry : scoreMembers.entrySet()) {
+      args.add(toByteArray(entry.getValue()));
+      args.add(entry.getKey());
+    }
+
+    return args;
+  }
+
+  private List<byte[]> convertGeoCoordinateMapToByteArrays(
+      Map<byte[], GeoCoordinate> memberCoordinateMap) {
+    List<byte[]> args = new ArrayList<byte[]>(memberCoordinateMap.size() * 3);
+
+    for (Entry<byte[], GeoCoordinate> entry : memberCoordinateMap.entrySet()) {
+      GeoCoordinate coordinate = entry.getValue();
+      args.add(toByteArray(coordinate.getLongitude()));
+      args.add(toByteArray(coordinate.getLatitude()));
+      args.add(entry.getKey());
+    }
+
+    return args;
   }
 }
